@@ -4,61 +4,12 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: write
+
 jobs:
-  cache-docker-images:
-    name: Cache Stacks
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        stack:
-          - 22
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build Heroku Stack Image
-        run: docker build -t heroku-${{ matrix.stack }} - < stacks/heroku-${{ matrix.stack }}.Dockerfile
-
-  download-otp:
-    name: Download OTP Source
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Get OTP Version
-        id: otp-version
-        run: |
-          echo "version=${GITHUB_REF/refs\/tags\//}" >> "$GITHUB_OUTPUT"
-
-      - name: Download OTP Source
-        run: wget https://github.com/erlang/otp/archive/OTP-${{ steps.otp-version.outputs.version }}.tar.gz
-
-      - name: Save OTP Source
-        uses: actions/upload-artifact@v4
-        with:
-          name: otp-source
-          path: OTP-${{ steps.otp-version.outputs.version }}.tar.gz
-
-      - name: Update Release
-        id: update_release
-        uses: tubone24/update_release@v1.3.1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Upload Release Assets
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.github_token }}
-        with:
-          upload_url: ${{ steps.update_release.outputs.upload_url }}
-          asset_path: OTP-${{ steps.otp-version.outputs.version }}.tar.gz
-          asset_name: OTP-${{ steps.otp-version.outputs.version }}.tar.gz
-          asset_content_type: application/gzip
-
   build:
     name: Build OTP for Heroku ${{ matrix.stack }}
-    needs: [cache-docker-images, download-otp]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -74,10 +25,13 @@ jobs:
         run: |
           echo "version=${GITHUB_REF/refs\/tags\//}" >> "$GITHUB_OUTPUT"
 
-      - name: Get OTP Source
-        uses: actions/download-artifact@v4
-        with:
-          name: otp-source
+      - name: Download OTP Source
+        env:
+          OTP: ${{ steps.otp-version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          wget https://github.com/erlang/otp/archive/OTP-${OTP}.tar.gz
+          gh release upload "${OTP}" "OTP-${OTP}.tar.gz" --clobber
 
       - name: Setup OTP Build
         env:
@@ -106,27 +60,14 @@ jobs:
           docker run -v $(pwd)/mount:/build -w /build/otp-OTP-$OTP heroku-$STACK make RELEASE_ROOT=/build/otp-release-files release
           docker run -v $(pwd)/mount:/build -w /build/otp-OTP-$OTP heroku-$STACK chmod -R 777 /build/otp-release-files
 
-      - name: Create Tarball
+      - name: Create and Upload Tarball
         working-directory: build
         env:
           OTP: ${{ steps.otp-version.outputs.version }}
+          STACK: ${{ matrix.stack }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir out
           mv mount/otp-release-files/ OTP-$OTP
           tar -zcf out/OTP-$OTP.tar.gz OTP-$OTP
-
-      - name: Update Release
-        id: update_release
-        uses: tubone24/update_release@v1.3.1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Upload Release Assets
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.github_token }}
-        with:
-          upload_url: ${{ steps.update_release.outputs.upload_url }}
-          asset_path: build/out/OTP-${{ steps.otp-version.outputs.version }}.tar.gz
-          asset_name: heroku-${{ matrix.stack }}.tar.gz
-          asset_content_type: application/gzip
+          gh release upload "${OTP}" "out/OTP-${OTP}.tar.gz#heroku-${STACK}.tar.gz" --clobber
