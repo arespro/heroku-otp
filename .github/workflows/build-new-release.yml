@@ -67,7 +67,6 @@ jobs:
           STACK: ${{ matrix.stack }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir out
           mv mount/otp-release-files/ OTP-$OTP
-          tar -zcf out/OTP-$OTP.tar.gz OTP-$OTP
-          gh release upload "${OTP}" "out/OTP-${OTP}.tar.gz#heroku-${STACK}.tar.gz" --clobber
+          tar -zcf heroku-${STACK}.tar.gz OTP-$OTP
+          gh release upload "${OTP}" "heroku-${STACK}.tar.gz" --clobber
